@@ -184,17 +184,19 @@ cmd_apply() {
 }
 
 cmd_status() {
-  local out
+  local units=()
 
-  out="$(systemctl list-timers --all | grep -F "${UNIT_BASE}@" || true)"
+  while IFS= read -r u; do
+    units+=("$u")
+  done < <(existing_managed_timers)
 
-  if [[ -z "$out" ]]; then
-    echo "No active timers found."
+  if ((${#units[@]} == 0)); then
+    echo "No managed timers found."
     echo "Add timers by editing $CONFIG (run: pihole-toggle configure)"
     return 0
   fi
 
-  echo "$out"
+  systemctl list-timers --all "${units[@]}"
 }
 
 cmd_configure() {
@@ -229,7 +231,7 @@ Usage: pihole-toggle <command>
 Commands:
   configure  Open $CONFIG in an editor
   list       Show schedules parsed from $CONFIG
-  status     Show timers matching ${UNIT_BASE}@
+  status     Show managed timers
   apply      Write drop-ins, daemon-reload, enable --now timers
   prune      Disable/remove managed timers not present in config (removes all if SCHEDULES is empty)
   sync       Apply config and prune timers; if SCHEDULES is empty, removes all managed timers
