@@ -1,0 +1,19 @@
+# Pi-hole Group Toggle configuration
+
+# Scheduled group actions
+# Format:
+#   "<group> <action> <OnCalendar>"
+#
+# <group>     : existing Pi-hole group name; must be in db
+# <action>    : enable | disable
+# <OnCalendar>: systemd OnCalendar= value (passed through verbatim)
+
+# Below are samples only - add/remove, rename groups, adjust times
+# Each line is one timer action
+
+SCHEDULES=(
+  "group-name-here disable *-*-* 22:00:00"
+  "group-name-here enable  *-*-* 06:00:00"
+  "another-example-name disable *-*-* 17:00:00"
+  "another-example-name enable  *-*-* 08:00:00"
+)

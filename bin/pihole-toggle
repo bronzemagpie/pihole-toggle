@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG="/etc/pihole-group-toggle.conf"
+UNIT_BASE="pihole-group-toggle"
+SYSTEMD_ETC="/etc/systemd/system"
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+require_root() {
+  [[ "${EUID}" -eq 0 ]] || die "Run as root (use sudo)."
+}
+
+load_config() {
+  [[ -f "$CONFIG" ]] || die "Missing config: $CONFIG"
+  # shellcheck disable=SC1090
+  source "$CONFIG"
+
+  # If SCHEDULES is missing, treat it as empty.
+  if ! declare -p SCHEDULES >/dev/null 2>&1; then
+    SCHEDULES=()
+  fi
+
+  # Enforce that SCHEDULES is an array
+  if ! declare -p SCHEDULES 2>/dev/null | grep -q '^declare \-a '; then
+    die "SCHEDULES must be a bash array. Use: SCHEDULES=( ...) or SCHEDULES=()"
+  fi
+}
+
+parse_entry() {
+  local entry="$1"
+  local group action cal
+  read -r group action cal <<<"$entry"
+
+  [[ -n "${group:-}" ]] || die "Bad entry (missing group): $entry"
+  [[ "$group" != *" "* ]] || die "Group names must not contain spaces: $group"
+
+  [[ "${action:-}" == "enable" || "${action:-}" == "disable" ]] || die "Bad entry (action must be enable|disable): $entry"
+  [[ -n "${cal:-}" ]] || die "Bad entry (missing OnCalendar value): $entry"
+
+  printf '%s\n' "$group" "$action" "$cal"
+}
+
+timer_unit() {
+  local action="$1" group="$2"
+  echo "${UNIT_BASE}@${action}:${group}.timer"
+}
+
+dropin_dir() {
+  local action="$1" group="$2"
+  echo "${SYSTEMD_ETC}/${UNIT_BASE}@${action}:${group}.timer.d"
+}
+
+write_dropin() {
+  local action="$1" group="$2" cal="$3"
+  local dir file
+  dir="$(dropin_dir "$action" "$group")"
+  file="${dir}/schedule.conf"
+
+  mkdir -p "$dir"
+  cat >"$file" <<EOC
+# Managed by pihole-toggle
+[Timer]
+OnCalendar=
+OnCalendar=${cal}
+EOC
+}
+
+desired_timers() {
+  load_config
+  local e group action
+  for e in "${SCHEDULES[@]}"; do
+    mapfile -t parts < <(parse_entry "$e")
+    group="${parts[0]}"; action="${parts[1]}"
+    timer_unit "$action" "$group"
+  done
+}
+
+existing_managed_timers() {
+  local f rel unit
+
+  while IFS= read -r -d '' f; do
+    # Only prune if ownership marker is present
+    grep -q '^# Managed by pihole-toggle$' "$f" || continue
+
+    rel="${f#${SYSTEMD_ETC}/}"
+    unit="${rel%.d/schedule.conf}"
+
+    [[ "$unit" == ${UNIT_BASE}@*.timer ]] || continue
+    printf '%s\n' "$unit"
+  done < <(
+    find "$SYSTEMD_ETC" -type f \
+      -path "${SYSTEMD_ETC}/${UNIT_BASE}@*.timer.d/schedule.conf" \
+      -print0 2>/dev/null
+  )
+}
+
+prune_removed() {
+  # Build lookup table of desired timers
+  declare -A want=()
+  local t
+  while IFS= read -r t; do
+    want["$t"]=1
+  done < <(desired_timers | sort -u)
+
+  # For each existing managed timer, disable/remove if not desired
+  local unit action group dir
+  while IFS= read -r unit; do
+    # Safety: only prune timers that match our namespace/pattern
+    [[ "$unit" == ${UNIT_BASE}@*.timer ]] || continue
+
+    [[ -n "${want[$unit]+x}" ]] && continue
+
+    echo "Removing unmanaged timer: $unit"
+    systemctl disable --now "$unit" || true
+
+    # unit is pihole-group-toggle@action:group.timer
+    # derive drop-in dir from action/group
+    action="${unit#${UNIT_BASE}@}"
+    action="${action%%:*}"
+    group="${unit#${UNIT_BASE}@${action}:}"
+    group="${group%.timer}"
+
+    dir="$(dropin_dir "$action" "$group")"
+    rm -rf "$dir"
+  done < <(existing_managed_timers)
+}
+
+cmd_sync() {
+  require_root
+  load_config
+
+  # If no schedules are defined, interpret sync as: remove all managed timers.
+  if ((${#SCHEDULES[@]} == 0)); then
+    prune_removed
+    systemctl daemon-reload
+    return 0
+  fi
+
+  cmd_apply
+  prune_removed
+  systemctl daemon-reload
+}
+
+cmd_list() {
+  load_config
+
+  if ((${#SCHEDULES[@]} == 0)); then
+    echo "No timers defined."
+    echo "Add timers by editing $CONFIG (run: pihole-toggle configure)"
+    return 0
+  fi
+
+  for e in "${SCHEDULES[@]}"; do
+    mapfile -t parts < <(parse_entry "$e")
+    local group="${parts[0]}" action="${parts[1]}" cal="${parts[2]}"
+    echo "group=${group} action=${action} OnCalendar=${cal}"
+  done
+}
+
+cmd_apply() {
+  require_root
+  load_config
+
+  # Verify systemd can see the template timer unit
+  if ! systemctl cat "${UNIT_BASE}@.timer" >/dev/null 2>&1; then
+    die "Cannot find ${UNIT_BASE}@.timer. Install the template timer unit first."
+  fi
+
+  for e in "${SCHEDULES[@]}"; do
+    mapfile -t parts < <(parse_entry "$e")
+    local group="${parts[0]}" action="${parts[1]}" cal="${parts[2]}"
+    write_dropin "$action" "$group" "$cal"
+    echo "Configured $(timer_unit "$action" "$group")"
+  done
+
+  systemctl daemon-reload
+
+  for e in "${SCHEDULES[@]}"; do
+    mapfile -t parts < <(parse_entry "$e")
+    local group="${parts[0]}" action="${parts[1]}"
+    systemctl enable --now "$(timer_unit "$action" "$group")"
+  done
+}
+
+cmd_status() {
+  local out
+
+  out="$(systemctl list-timers --all | grep -F "${UNIT_BASE}@" || true)"
+
+  if [[ -z "$out" ]]; then
+    echo "No active timers found."
+    echo "Add timers by editing $CONFIG (run: pihole-toggle configure)"
+    return 0
+  fi
+
+  echo "$out"
+}
+
+cmd_configure() {
+  require_root
+
+  local editor="${EDITOR:-}"
+
+  if [[ -z "$editor" ]]; then
+    if command -v nano >/dev/null 2>&1; then
+      editor=nano
+    elif command -v vi >/dev/null 2>&1; then
+      editor=vi
+    else
+      die "No editor found. Set \$EDITOR or install nano or vi."
+    fi
+  fi
+
+  exec "$editor" "$CONFIG"
+}
+
+cmd_prune() {
+  require_root
+  load_config
+  prune_removed
+  systemctl daemon-reload
+}
+
+usage() {
+  cat <<EOU
+Usage: pihole-toggle <command>
+
+Commands:
+  configure  Open $CONFIG in an editor
+  list       Show schedules parsed from $CONFIG
+  status     Show timers matching ${UNIT_BASE}@
+  apply      Write drop-ins, daemon-reload, enable --now timers
+  prune      Disable/remove managed timers not present in config (removes all if SCHEDULES is empty)
+  sync       Apply config and prune timers; if SCHEDULES is empty, removes all managed timers
+EOU
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+  case "$cmd" in
+    list)   cmd_list ;;
+    apply)  cmd_apply ;;
+    prune)  cmd_prune ;;
+    sync)   cmd_sync ;;
+    configure) cmd_configure ;;
+    status) cmd_status ;;
+    ""|-h|--help|help) usage ;;
+    *) die "Unknown command: $cmd" ;;
+  esac
+}
+
+main "$@"

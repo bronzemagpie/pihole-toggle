@@ -1,0 +1,8 @@
+[Unit]
+Description=Schedule pihole group toggle (%i)
+
+[Timer]
+Persistent=true
+
+[Install]
+WantedBy=timers.target

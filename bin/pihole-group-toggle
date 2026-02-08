@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+db="/etc/pihole/gravity.db"
+
+arg="${1:-}"
+case "$arg" in
+  enable:*)  val=1; group="${arg#enable:}" ;;
+  disable:*) val=0; group="${arg#disable:}" ;;
+  *) echo "Usage: enable:<group> | disable:<group>" >&2; exit 2 ;;
+esac
+
+# Escape single quotes for SQLite string literals
+group_sql=${group//\'/\'\'}
+
+# Make sure group exists (otherwise fail loudly)
+exists="$(/usr/bin/sqlite3 "$db" "SELECT COUNT(1) FROM \"group\" WHERE name='$group_sql';")"
+if [[ "$exists" != "1" ]]; then
+  echo "Group not found in DB: $group" >&2
+  exit 3
+fi
+
+# Update enabled flag
+/usr/bin/sqlite3 "$db" "UPDATE \"group\" SET enabled=$val WHERE name='$group_sql';"
+
+# Apply changes
+if command -v pihole >/dev/null 2>&1; then
+  pihole reloaddns
+  pihole reloadlists
+  pihole updateGravity
+fi
