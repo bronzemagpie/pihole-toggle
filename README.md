@@ -134,3 +134,9 @@ Safety notes
 - Schedules must follow the format described for correct parsing
 - This tool modifies Pi-hole’s database via the supported schema
 - Only timers explicitly marked as managed by pihole-toggle are removed
+
+
+License
+-------
+
+MIT License
