@@ -67,13 +67,16 @@ SCHEDULES=(
   "kids enable  *-*-* 07:00:00"
 )
 
+Each entry in SHEDULES must beign with exactly two spaces.
+Two leading spaces are required for correct parsing.
 
-Review configuration
+
+Review Configuration - See Your Timers
 --------------------
 
-Show how the configuration is parsed:
+See a list of the timers entered into the configuration file
 
-sudo pihole-toggle list
+sudo pihole-list
 
 
 Apply timers
@@ -85,11 +88,12 @@ sudo pihole-toggle apply
 
 This writes systemd timer drop-ins and enables the timers.
 
+
 Alternatively, use the sync command:
 
 sudo pihole-toggle sync
 
-This automatically adds and removes timers.
+This automatically adds and removes timers and handles enable or disable.
 
 
 Check status
@@ -98,6 +102,8 @@ Check status
 Show timers managed by this tool:
 
 sudo pihole-toggle status
+
+Timers use an ownership marker to ensure they may be written and removed safely.
 
 
 Remove timers but keep the tool
@@ -117,7 +123,7 @@ Alternatively, use the sync command:
 
 sudo pihole-toggle sync
 
-This automatically adds and removes timers.
+This automatically adds and removes timers and handles enable and disable.
 
 
 Safety notes
@@ -125,5 +131,6 @@ Safety notes
 
 - Group names must already exist in Pi-hole
 - Group names must not contain spaces
+- Schedules must follow the format described for correct parsing
 - This tool modifies Pi-hole’s database via the supported schema
 - Only timers explicitly marked as managed by pihole-toggle are removed

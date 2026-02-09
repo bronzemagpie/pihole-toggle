@@ -9,7 +9,7 @@
 # <OnCalendar>: systemd OnCalendar= value (passed through verbatim)
 
 # Below are samples only - add/remove, rename groups, adjust times
-# Each line is one timer action
+# Each line is one timer action. Each entry must begin with exactly two spaces.
 
 SCHEDULES=(
   "group-name-here disable *-*-* 22:00:00"
