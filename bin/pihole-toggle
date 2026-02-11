@@ -224,6 +224,33 @@ cmd_prune() {
   systemctl daemon-reload
 }
 
+cmd_purge() {
+  require_root
+
+  local unit action group dir
+
+  # Disable and remove every managed timer (ignores config)
+  while IFS= read -r unit; do
+    [[ -n "$unit" ]] || continue
+    [[ "$unit" == ${UNIT_BASE}@*.timer ]] || continue
+
+    echo "Purging timer: $unit"
+    systemctl disable --now "$unit" || true
+
+    action="${unit#${UNIT_BASE}@}"
+    action="${action%%:*}"
+    group="${unit#${UNIT_BASE}@${action}:}"
+    group="${group%.timer}"
+
+    dir="$(dropin_dir "$action" "$group")"
+    rm -rf "$dir"
+  done < <(existing_managed_timers)
+
+  systemctl daemon-reload
+}
+
+
+
 usage() {
   cat <<EOU
 Usage: pihole-toggle <command>
@@ -235,6 +262,7 @@ Commands:
   apply      Write drop-ins, daemon-reload, enable --now timers
   prune      Disable/remove managed timers not present in config (removes all if SCHEDULES is empty)
   sync       Apply config and prune timers; if SCHEDULES is empty, removes all managed timers
+  purge      Disable/remove all managed timers (ignores config)
 EOU
 }
 
@@ -248,6 +276,7 @@ main() {
     sync)   cmd_sync ;;
     configure) cmd_configure ;;
     status) cmd_status ;;
+    purge)  cmd_purge ;;
     ""|-h|--help|help) usage ;;
     *) die "Unknown command: $cmd" ;;
   esac
