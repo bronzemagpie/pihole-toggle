@@ -30,7 +30,7 @@ Install
 
 Clone the repository and run the installer:
 
-git clone <repo-url>
+git clone https://github.com/bronzemagpie/pihole-toggle.git
 cd pihole-toggle
 sudo ./install.sh
 
@@ -70,8 +70,12 @@ SCHEDULES=(
 Each entry in SHEDULES must beign with exactly two spaces.
 Two leading spaces are required for correct parsing.
 
+The format is standard calednar event syntax:
+DayOfWeek Year-Month-Day Hour:Minute:Second
+
 
 Review Configuration - See Your Timers
+
 --------------------
 
 See a list of the timers entered into the configuration file
@@ -124,6 +128,11 @@ Alternatively, use the sync command:
 sudo pihole-toggle sync
 
 This automatically adds and removes timers and handles enable and disable.
+
+
+sudo pihole-toggle purge will disable and remove all active timers, even if they are listed in .conf
+They will not activate again unless you run apply or sync.
+
 
 
 Safety notes
