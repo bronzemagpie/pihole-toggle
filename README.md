@@ -35,7 +35,6 @@ sudo ./install.sh
 ```
 
 The installer:
-- installs required dependencies, including sqlite3
 - installs scripts into /usr/local/sbin
 - installs systemd unit templates
 - creates `/etc/pihole-group-toggle.conf` if it does not exist
