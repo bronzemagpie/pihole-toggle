@@ -9,9 +9,6 @@ require_root() {
 
 require_root
 
-# Install dependencies
-apt-get update
-apt-get install -y sqlite3
 
 # Install scripts
 install -m 0755 -o root -g root bin/pihole-group-toggle /usr/local/sbin/pihole-group-toggle

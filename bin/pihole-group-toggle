@@ -14,18 +14,17 @@ esac
 group_sql=${group//\'/\'\'}
 
 # Make sure group exists (otherwise fail loudly)
-exists="$(/usr/bin/sqlite3 "$db" "SELECT COUNT(1) FROM \"group\" WHERE name='$group_sql';")"
+exists="$(pihole-FTL sqlite3 "$db" "SELECT COUNT(1) FROM \"group\" WHERE name='$group_sql';")"
 if [[ "$exists" != "1" ]]; then
   echo "Group not found in DB: $group" >&2
   exit 3
 fi
 
 # Update enabled flag
-/usr/bin/sqlite3 "$db" "UPDATE \"group\" SET enabled=$val WHERE name='$group_sql';"
+pihole-FTL sqlite3 "$db" "UPDATE \"group\" SET enabled=$val WHERE name='$group_sql';"
 
 # Apply changes
 if command -v pihole >/dev/null 2>&1; then
   pihole reloaddns
   pihole reloadlists
-  pihole updateGravity
 fi

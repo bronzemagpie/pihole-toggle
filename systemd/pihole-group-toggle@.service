@@ -4,4 +4,4 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/pihole-group-toggle '%i'
+ExecStart=/usr/bin/flock -w 60 /run/pihole-toggle.lock /usr/local/sbin/pihole-group-toggle '%i'
