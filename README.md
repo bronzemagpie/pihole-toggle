@@ -151,6 +151,30 @@ will disable and remove all active timers, even if they are listed in .conf
 
 Timers will not activate again unless you run apply or sync.
 
+The script:
+
+- Finds all timers marked `# Managed by pihole-toggle`
+- Disables those timers, regardless of what is listed in the configuration file
+- Removes their systemd drop-in directories
+- Deletes the installed service and timer templates
+- Removes the pihole-toggle executables from `/usr/local/sbin`
+- Reloads systemd to clear the removed units
+
+The configuration file at `/etc/pihole-group-toggle.conf` is not removed. This allows you to reinstall the tool later without recreating your schedules.
+
+To remove the configuration file as well:
+
+```
+sudo rm /etc/pihole-group-toggle.conf
+```
+
+Run the uninstall script from the repository directory:
+
+```
+sudo ./uninstall.sh
+```
+
+The script is safe to run multiple times.
 
 
 Safety notes
