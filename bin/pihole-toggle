@@ -41,6 +41,60 @@ parse_entry() {
   printf '%s\n' "$group" "$action" "$cal"
 }
 
+validate_entry() {
+  local idx="$1"
+  local entry="$2"
+
+  local group action cal
+  mapfile -t parts < <(parse_entry "$entry")
+  group="${parts[0]:-}"
+  action="${parts[1]:-}"
+  cal="${parts[2]:-}"
+
+  if [[ -z "$group" || -z "$action" || -z "$cal" ]]; then
+    die "Invalid schedule at index $idx: must be \"<group> <enable|disable> <OnCalendar>\""
+  fi
+
+  # Action
+  case "$action" in
+    enable|disable) ;;
+    *) die "Invalid action at index $idx: '$action' (must be enable or disable)" ;;
+  esac
+
+  # Group name (no whitespace)
+  if [[ "$group" =~ [[:space:]] ]]; then
+    die "Invalid group at index $idx: '$group' (group names must not contain spaces)"
+  fi
+
+  # Restrict Group to safe characters
+  if [[ ! "$group" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+    die "Invalid group at index $idx: '$group' (allowed: A-Z a-z 0-9 . _ : -)"
+  fi
+
+  # Validate OnCalendar
+  if ! systemd-analyze calendar "$cal" >/dev/null 2>&1; then
+    die "Invalid OnCalendar at index $idx: '$cal' (try: systemd-analyze calendar \"$cal\")"
+  fi
+
+  # Validate the group exists in Pi-hole DB (fast-fail)
+  if command -v pihole-FTL >/dev/null 2>&1 && [[ -f /etc/pihole/gravity.db ]]; then
+    local db="/etc/pihole/gravity.db"
+    local group_sql=${group//\'/\'\'}
+    local exists
+    exists="$(pihole-FTL sqlite3 "$db" "SELECT COUNT(1) FROM \"group\" WHERE name='$group_sql';" 2>/dev/null || true)"
+    if [[ "$exists" != "1" ]]; then
+      die "Group not found in Pi-hole DB at index $idx: '$group'"
+    fi
+  fi
+}
+
+validate_config() {
+  local i
+  for i in "${!SCHEDULES[@]}"; do
+    validate_entry "$i" "${SCHEDULES[$i]}"
+  done
+}
+
 timer_unit() {
   local action="$1" group="$2"
   echo "${UNIT_BASE}@${action}:${group}.timer"
@@ -126,20 +180,28 @@ prune_removed() {
   done < <(existing_managed_timers)
 }
 
-cmd_sync() {
+cmd_configure() {
   require_root
-  load_config
 
-  # If no schedules are defined, interpret sync as: remove all managed timers.
-  if ((${#SCHEDULES[@]} == 0)); then
-    prune_removed
-    systemctl daemon-reload
-    return 0
+  local editor="${EDITOR:-}"
+
+  if [[ -z "$editor" ]]; then
+    if command -v nano >/dev/null 2>&1; then
+      editor=nano
+    elif command -v vi >/dev/null 2>&1; then
+      editor=vi
+    else
+      die "No editor found. Set \$EDITOR or install nano or vi."
+    fi
   fi
 
-  cmd_apply
-  prune_removed
-  systemctl daemon-reload
+  exec "$editor" "$CONFIG"
+}
+
+cmd_validate() {
+  load_config
+  validate_config
+  echo "Config OK."
 }
 
 cmd_list() {
@@ -158,9 +220,26 @@ cmd_list() {
   done
 }
 
+cmd_status() {
+  local units=()
+
+  while IFS= read -r u; do
+    units+=("$u")
+  done < <(existing_managed_timers)
+
+  if ((${#units[@]} == 0)); then
+    echo "No managed timers found."
+    echo "Add timers by editing $CONFIG (run: pihole-toggle configure)"
+    return 0
+  fi
+
+  systemctl list-timers --all "${units[@]}"
+}
+
 cmd_apply() {
   require_root
   load_config
+  validate_config
 
   # Verify systemd can see the template timer unit
   if ! systemctl cat "${UNIT_BASE}@.timer" >/dev/null 2>&1; then
@@ -183,43 +262,25 @@ cmd_apply() {
   done
 }
 
-cmd_status() {
-  local units=()
-
-  while IFS= read -r u; do
-    units+=("$u")
-  done < <(existing_managed_timers)
-
-  if ((${#units[@]} == 0)); then
-    echo "No managed timers found."
-    echo "Add timers by editing $CONFIG (run: pihole-toggle configure)"
-    return 0
-  fi
-
-  systemctl list-timers --all "${units[@]}"
-}
-
-cmd_configure() {
-  require_root
-
-  local editor="${EDITOR:-}"
-
-  if [[ -z "$editor" ]]; then
-    if command -v nano >/dev/null 2>&1; then
-      editor=nano
-    elif command -v vi >/dev/null 2>&1; then
-      editor=vi
-    else
-      die "No editor found. Set \$EDITOR or install nano or vi."
-    fi
-  fi
-
-  exec "$editor" "$CONFIG"
-}
-
 cmd_prune() {
   require_root
   load_config
+  prune_removed
+  systemctl daemon-reload
+}
+
+cmd_sync() {
+  require_root
+  load_config
+
+  # If no schedules are defined, interpret sync as: remove all managed timers.
+  if ((${#SCHEDULES[@]} == 0)); then
+    prune_removed
+    systemctl daemon-reload
+    return 0
+  fi
+
+  cmd_apply
   prune_removed
   systemctl daemon-reload
 }
@@ -249,14 +310,13 @@ cmd_purge() {
   systemctl daemon-reload
 }
 
-
-
 usage() {
   cat <<EOU
 Usage: pihole-toggle <command>
 
 Commands:
   configure  Open $CONFIG in an editor
+  validate   Validate $CONFIG (no changes made)
   list       Show schedules parsed from $CONFIG
   status     Show managed timers
   apply      Write drop-ins, daemon-reload, enable --now timers
@@ -270,12 +330,13 @@ main() {
   local cmd="${1:-}"
   shift || true
   case "$cmd" in
+    configure) cmd_configure ;;
+    validate) cmd_validate ;;
     list)   cmd_list ;;
+    status) cmd_status ;;
     apply)  cmd_apply ;;
     prune)  cmd_prune ;;
     sync)   cmd_sync ;;
-    configure) cmd_configure ;;
-    status) cmd_status ;;
     purge)  cmd_purge ;;
     ""|-h|--help|help) usage ;;
     *) die "Unknown command: $cmd" ;;
