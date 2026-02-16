@@ -20,7 +20,7 @@ Requirements
 
 - Pi-hole installed and working
 - systemd (Raspberry Pi OS / Debian-based systems)
-- Group names must not contain spaces
+- Groups must already exist in Pi-Hole
 
 
 Install
@@ -90,6 +90,17 @@ This is not a list of *active* timers. What displays is a parsed list of the tim
 
 Useful for confirming groups and times were parsed correctly.
 
+Validate Your Calendar Entries
+-------------------------------
+
+Validate that your entries into the configuration file are being parsed correctly.
+
+```bash
+pihole-toggle validate
+```
+
+Useful for seeing where an error may be coming from.
+
 
 Sync config changes
 -------------------
@@ -150,6 +161,10 @@ will disable and remove all active timers, even if they are listed in .conf
 
 Timers will not activate again unless you run apply or sync.
 
+
+Uninstall
+---------
+
 The script:
 
 - Finds all timers marked `# Managed by pihole-toggle`
@@ -180,7 +195,6 @@ Safety notes
 ------------
 
 - Group names must already exist in Pi-hole
-- Group names must not contain spaces
 - Schedules must follow the format described for correct parsing
 - This tool modifies Pi-hole’s database via the supported schema
 - Only timers explicitly marked as managed by pihole-toggle are ever disabled/removed

@@ -3,12 +3,22 @@ set -euo pipefail
 
 db="/etc/pihole/gravity.db"
 
+# Decode group name from systemd unit name
+# Replaces double underscores with spaces
+decode_group() {
+  local encoded="$1"
+  echo "${encoded//__/ }"
+}
+
 arg="${1:-}"
 case "$arg" in
-  enable:*)  val=1; group="${arg#enable:}" ;;
-  disable:*) val=0; group="${arg#disable:}" ;;
+  enable:*)  val=1; encoded_group="${arg#enable:}" ;;
+  disable:*) val=0; encoded_group="${arg#disable:}" ;;
   *) echo "Usage: enable:<group> | disable:<group>" >&2; exit 2 ;;
 esac
+
+# Decode the group name (convert __ back to spaces)
+group="$(decode_group "$encoded_group")"
 
 # Escape single quotes for SQLite string literals
 group_sql=${group//\'/\'\'}

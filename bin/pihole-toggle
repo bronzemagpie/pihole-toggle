@@ -30,11 +30,19 @@ load_config() {
 parse_entry() {
   local entry="$1"
   local group action cal
-  read -r group action cal <<<"$entry"
+  
+  # Check if entry starts with a quote
+  if [[ "$entry" =~ ^\"([^\"]+)\"[[:space:]]+([^[:space:]]+)[[:space:]]+(.+)$ ]]; then
+    # Quoted group name: extract group, action, and calendar
+    group="${BASH_REMATCH[1]}"
+    action="${BASH_REMATCH[2]}"
+    cal="${BASH_REMATCH[3]}"
+  else
+    # Unquoted: use simple word splitting
+    read -r group action cal <<<"$entry"
+  fi
 
   [[ -n "${group:-}" ]] || die "Bad entry (missing group): $entry"
-  [[ "$group" != *" "* ]] || die "Group names must not contain spaces: $group"
-
   [[ "${action:-}" == "enable" || "${action:-}" == "disable" ]] || die "Bad entry (action must be enable|disable): $entry"
   [[ -n "${cal:-}" ]] || die "Bad entry (missing OnCalendar value): $entry"
 
@@ -61,13 +69,8 @@ validate_entry() {
     *) die "Invalid action at index $idx: '$action' (must be enable or disable)" ;;
   esac
 
-  # Group name (no whitespace)
-  if [[ "$group" =~ [[:space:]] ]]; then
-    die "Invalid group at index $idx: '$group' (group names must not contain spaces)"
-  fi
-
   # Restrict Group to safe characters
-  if [[ ! "$group" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+  if [[ ! "$group" =~ ^[A-Za-z0-9._:\ -]+$ ]]; then
     die "Invalid group at index $idx: '$group' (allowed: A-Z a-z 0-9 . _ : -)"
   fi
 
@@ -95,14 +98,29 @@ validate_config() {
   done
 }
 
+# Encode / Decode for Readable Timer Names with Spaces
+encode_group() {
+  local group="$1"
+  echo "${group// /__}"
+}
+
+decode_group() {
+  local encoded="$1"
+  echo "${encoded//__/ }"
+}
+
 timer_unit() {
   local action="$1" group="$2"
-  echo "${UNIT_BASE}@${action}:${group}.timer"
+  local encoded_group
+  encoded_group="$(encode_group "$group")"
+  echo "${UNIT_BASE}@${action}:${encoded_group}.timer"
 }
 
 dropin_dir() {
   local action="$1" group="$2"
-  echo "${SYSTEMD_ETC}/${UNIT_BASE}@${action}:${group}.timer.d"
+  local encoded_group
+  encoded_group="$(encode_group "$group")"
+  echo "${SYSTEMD_ETC}/${UNIT_BASE}@${action}:${encoded_group}.timer.d"
 }
 
 write_dropin() {
@@ -158,9 +176,9 @@ prune_removed() {
   done < <(desired_timers | sort -u)
 
   # For each existing managed timer, disable/remove if not desired
-  local unit action group dir
+  local unit action encoded_group group dir
   while IFS= read -r unit; do
-    # Safety: only prune timers that match our namespace/pattern
+    # Safety: only prune timers have managed by ownership marker
     [[ "$unit" == ${UNIT_BASE}@*.timer ]] || continue
 
     [[ -n "${want[$unit]+x}" ]] && continue
@@ -168,12 +186,15 @@ prune_removed() {
     echo "Removing unmanaged timer: $unit"
     systemctl disable --now "$unit" || true
 
-    # unit is pihole-group-toggle@action:group.timer
-    # derive drop-in dir from action/group
+    # unit is pihole-group-toggle@action:encoded_group.timer
+    # derive drop-in dir from action/encoded_group
     action="${unit#${UNIT_BASE}@}"
     action="${action%%:*}"
-    group="${unit#${UNIT_BASE}@${action}:}"
-    group="${group%.timer}"
+    encoded_group="${unit#${UNIT_BASE}@${action}:}"
+    encoded_group="${encoded_group%.timer}"
+    
+    # Decode the group name back to original (with spaces)
+    group="$(decode_group "$encoded_group")"
 
     dir="$(dropin_dir "$action" "$group")"
     rm -rf "$dir"
@@ -288,7 +309,7 @@ cmd_sync() {
 cmd_purge() {
   require_root
 
-  local unit action group dir
+  local unit action encoded_group group dir
 
   # Disable and remove every managed timer (ignores config)
   while IFS= read -r unit; do
@@ -298,10 +319,14 @@ cmd_purge() {
     echo "Purging timer: $unit"
     systemctl disable --now "$unit" || true
 
+    # Extract action and encoded group name from unit name
     action="${unit#${UNIT_BASE}@}"
     action="${action%%:*}"
-    group="${unit#${UNIT_BASE}@${action}:}"
-    group="${group%.timer}"
+    encoded_group="${unit#${UNIT_BASE}@${action}:}"
+    encoded_group="${encoded_group%.timer}"
+    
+    # Decode the group name back to original (with spaces)
+    group="$(decode_group "$encoded_group")"
 
     dir="$(dropin_dir "$action" "$group")"
     rm -rf "$dir"
